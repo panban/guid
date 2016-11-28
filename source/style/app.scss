@@ -64,6 +64,7 @@ input {
 .guid input {
   text-align: center;
   font-family: monospace;
+  width: 360px;
 
   &::-ms-clear {
     display: none;
