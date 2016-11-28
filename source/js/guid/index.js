@@ -1,21 +1,132 @@
-const Field = require('./field');
+// const Field = require('./field');
+
+function getChar($event) {
+  if ($event.which === null) {
+    return $event.keyCode < 32 ? null : String.fromCharCode($event.keyCode);
+  }
+
+  if (($event.which !== 0) && ($event.charCode !== 0)) {
+    return $event.which < 32 ? null : String.fromCharCode($event.which);
+  }
+
+  return null;
+}
 
 class Guid {
 
   constructor(container) {
     this.container = container;
+    this.element = this.container.querySelector('input');
 
-    let inputEls = container.querySelectorAll('input');
-    inputEls = Array.from(inputEls);
+    this.element.addEventListener('keydown', this.onKeydown.bind(this));
+    this.element.addEventListener('keypress', this.onKeypress.bind(this));
 
-    this.fields = inputEls.map(p => new Field(this, p));
-
-    this.container.addEventListener('focus', this.onFocus.bind(this), true);
-    this.container.addEventListener('blur', this.onBlur.bind(this), true);
+    this.mask = 'XXX-XXX-XXX';
+    this.value = this.formatStringByMask('', this.mask);
+    // this.container.addEventListener('focus', this.onFocus.bind(this), true);
+    // this.container.addEventListener('blur', this.onBlur.bind(this), true);
   }
 
-  get active() {
-    return this.fields[this.activeIndex];
+  get value() {
+    return this.element.value;
+  }
+
+  set value(newValue) {
+    this.element.value = newValue;
+  }
+
+  onKeypress($event) {
+    $event.preventDefault();
+
+    const char = getChar($event);
+    if (!(char && this.isValidChar(char))) {
+      return;
+    }
+
+    const normalizedPosition = this.normalizePosition();
+    this.insert(char, normalizedPosition);
+
+    const position = Math.max(
+      this.denormalizePosition(normalizedPosition + 1),
+      this.denormalizePosition(normalizedPosition + 2) - 1
+    );
+
+    this.element.setSelectionRange(position, position);
+  }
+
+  onKeydown($event) {}
+
+  insert(char, position) {
+    const guidString = this.value.replace(/[^a-f\d]/gi, '');
+
+    let value = guidString.slice(0, position);
+    value += char.toLowerCase();
+    value += guidString.slice(position + char.length);
+
+    this.value = this.formatStringByMask(value, this.mask);
+    return this;
+  }
+
+  normalizePosition() {
+    const position = this.element.selectionStart;
+    if (position < 0 || position > this.mask.length) {
+      return 0;
+    }
+
+    let result = 0;
+    for (let i = 0; i < this.mask.length; i++) {
+      if(position === i) {
+        return result;
+      }
+
+      if(this.mask[i] === "X") {
+        result += 1;
+      }
+    }
+
+    return result;
+  }
+
+  denormalizePosition(position) {
+    let result = 0;
+
+    if (position < 0 || position > this.mask.length) {
+      return 0;
+    }
+
+    for (let i = 0; i < this.mask.length; i++) {
+      if (result === position) {
+        return i;
+      }
+
+      if (this.mask[i] === "X") {
+        result += 1;
+      }
+    }
+
+    return this.mask.length;
+  }
+
+  isValidChar(char = '') {
+    return /^[a-f\d]/i.test(char);
+  }
+
+  formatStringByMask(string, mask) {
+    let result = '';
+
+    let stringIndex = 0;
+    for (let i = 0; i < mask.length; i++) {
+      const maskChar = mask.charAt(i);
+
+      if (maskChar === 'X') {
+        result += string.charAt(stringIndex) || '0';
+        stringIndex += 1;
+      } else {
+        result += maskChar;
+      }
+    }
+
+    return result;
   }
 
   onFocus($event) {
@@ -27,49 +138,8 @@ class Guid {
     this.activeIndex = null;
   }
 
-  hasNextField() {
-    const hasNext = !!this.fields[this.activeIndex + 1];
-    return hasNext;
-  }
-
-  hasPrevField() {
-    const hasPrev = !!this.fields[this.activeIndex - 1];
-    return hasPrev;
-  }
-
-  nextField() {
-    if (this.activeIndex === null) {
-      return null;
-    }
-
-    const nextIndex = this.activeIndex + 1;
-    const next = this.fields[nextIndex];
-    if (!next) {
-      return null;
-    }
-
-    this.activeIndex = nextIndex;
-    next.focus();
-    return next;
-  }
-
-  prevField() {
-    if (this.activeIndex === null) {
-      return null;
-    }
-
-    const prevIndex = this.activeIndex - 1;
-    const prev = this.fields[prevIndex];
-    if (!prev) {
-      return null;
-    }
-
-    this.activeIndex = prevIndex;
-    prev.focus();
-    return prev;
-  }
-
   read(source = '', startField, startIndex = 0) {
+    return 'todo read';
     // todo: make angular check
     if (typeof source !== 'string') {
       return;
@@ -108,6 +178,7 @@ class Guid {
   }
 
   write() {
+    return 'todo write';
     let value = this.fields.reduce((string, item) => {
       const separator = string ? '-' : '';
       return string + separator + item.value;
