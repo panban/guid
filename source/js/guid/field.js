@@ -24,8 +24,12 @@ function getChar($event) {
   return null;
 }
 
-function keyIsCommand($event) {
+function isCommandKey($event) {
   return $event.ctrlKey || $event.metaKey;
+}
+
+function isGuidChar(char = '') {
+  return /^[a-f\d]/i.test(char);
 }
 
 class Field {
@@ -35,17 +39,14 @@ class Field {
     this.element = element;
     this.caret = new Caret(this);
 
-    this.max = element.maxLength;
-    this.zero = '0';
     this.mask = 'XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX';
+    this.element.maxLength = this.mask.length;
 
     this.element.addEventListener('keypress', this.onKeypress.bind(this));
     this.element.addEventListener('keydown', this.onKeydown.bind(this));
     this.element.addEventListener('cut', $event => $event.preventDefault());
     this.element.addEventListener('drop', $event => $event.preventDefault());
     this.element.addEventListener('dragstart', $event => $event.preventDefault());
-
-    this.value = this.format('', this.mask);
   }
 
   get value() {
@@ -56,49 +57,23 @@ class Field {
     this.element.value = newValue;
   }
 
-  format(string) {
-    let result = '';
+  insert(char, start, end) {
+    const guid = this.guid.parseGuid(this.value);
 
-    let stringIndex = 0;
-    for (let i = 0; i < this.mask.length; i++) {
-      const maskChar = this.mask.charAt(i);
-
-      if (maskChar === 'X') {
-        result += string.charAt(stringIndex) || this.zero;
-        stringIndex += 1;
-      } else {
-        result += maskChar;
-      }
-    }
-
-    return result;
-  }
-
-  removeChars(position) {
-    const guidString = this.value.replace(/[^a-f\d]/gi, '');
-    let value = '';
-
-    if (position > 0) {
-      value += this.zero.repeat(position);
-      value += guidString.slice(position);
-    } else {
-      value += guidString.slice(0, -position);
-      value += this.zero.repeat(this.mask.length + position);
-    }
+    let value = guid.slice(0, start);
+    value += char.toLowerCase();
+    value += guid.slice(end);
 
     this.value = this.format(value);
-    return this;
   }
 
-  insert(char, position) {
-    const guidString = this.value.replace(/[^a-f\d]/gi, '');
+  remove(start, end) {
+    const guid = this.guid.parseGuid(this.value);
 
-    let value = guidString.slice(0, position);
-    value += char.toLowerCase();
-    value += guidString.slice(position + char.length);
+    let value = guid.slice(0, start);
+    value += guid.slice(end);
 
-    this.value = this.format(value, this.mask);
-    return this;
+    this.value = this.format(value);
   }
 
   onKeydown($event) {
@@ -116,67 +91,99 @@ class Field {
   }
 
   onKeypress($event) {
-    $event.preventDefault();
-
     const char = getChar($event);
-    if (!(char && this.isValidChar(char))) {
+    if (!(char && isGuidChar(char))) {
+      $event.preventDefault();
       return;
     }
 
-    const normalizedPosition = this.caret.normalize();
-    this.insert(char, normalizedPosition);
+    const isFull = (this.value.length + 1) > this.mask.length;
+    if (isFull && this.caret.collapse) {
+      $event.preventDefault();
+      return;
+    }
+
+    const normalizedStart = this.caret.normalize(this.caret.start);
+    const normalizedEnd = this.caret.normalize(this.caret.end);
+    this.insert(char, normalizedStart, normalizedEnd);
     this.guid.write();
 
     this.caret.position = Math.max(
-      this.caret.denormalize(normalizedPosition + 1),
-      this.caret.denormalize(normalizedPosition + 2) - 1
+      this.caret.denormalize(normalizedStart + 1),
+      this.caret.denormalize(normalizedStart + 2) - 1
     );
-  }
 
-  isValidChar(char = '') {
-    return /^[a-f\d]/i.test(char);
+    $event.preventDefault();
   }
 
   backspaceHandler($event) {
     $event.preventDefault();
 
-    if (this.caret.isStart()) {
+    const isCollapse = this.caret.collapse;
+    if (this.caret.isStart() && isCollapse) {
       return;
     }
 
-    const normalizedPosition = this.caret.normalize();
-    const denormalizedPosition = this.caret.denormalize(normalizedPosition);
-    if (keyIsCommand($event)) {
-      this.removeChars(normalizedPosition);
-      this.guid.write();
-      this.caret.position = 0;
-      return;
+    let start = this.caret.normalize(this.caret.start);
+    let end = this.caret.normalize(this.caret.end);
+
+    if (isCommandKey($event)) {
+      end = Math.max(start, end);
+      start = 0;
+    } else if (isCollapse) {
+      start -= 1;
     }
 
-    this.insert(this.zero, normalizedPosition - 1);
+    this.remove(start, end);
     this.guid.write();
-    this.caret.position = denormalizedPosition - 1;
+    this.caret.position = this.caret.denormalize(start);
   }
 
   deleteHandler($event) {
     $event.preventDefault();
 
+    const isCollapse = this.caret.collapse;
     if (this.caret.isEnd()) {
       return;
     }
 
-    const normalizedPosition = this.caret.normalize();
-    const denormalizedPosition = this.caret.denormalize(normalizedPosition);
-    if (keyIsCommand($event)) {
-      this.removeChars(-normalizedPosition);
-      this.guid.write();
-      this.caret.position = this.mask.length;
-      return;
+    let start = this.caret.normalize(this.caret.start);
+    let end = this.caret.normalize(this.caret.end);
+
+    if (isCommandKey($event)) {
+      start = Math.min(start, end);
+      end = this.mask.length;
+    } else if (isCollapse) {
+      end += 1;
     }
 
-    this.insert(this.zero, normalizedPosition);
+    this.remove(start, end);
     this.guid.write();
-    this.caret.position = denormalizedPosition + 1;
+    this.caret.position = this.caret.denormalize(start);
+  }
+
+  format(string) {
+    let result = '';
+
+    let stringIndex = 0;
+    for (let i = 0; i < this.mask.length; i++) {
+      const maskChar = this.mask.charAt(i);
+
+      if (maskChar !== 'X') {
+        result += maskChar;
+        continue;
+      }
+
+      const stringChar = string.charAt(stringIndex);
+      if (!stringChar) {
+        return result;
+      }
+
+      result += stringChar;
+      stringIndex += 1;
+    }
+
+    return result;
   }
 }
 
